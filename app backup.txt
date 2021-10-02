@@ -1,0 +1,112 @@
+from flask import Flask, render_template, request
+import keras
+import tensorflow
+from keras.models import load_model
+from keras.preprocessing import image
+from keras.preprocessing.image import load_img
+from keras.preprocessing.image import img_to_array
+from keras.applications.vgg16 import preprocess_input
+from keras.applications.vgg16 import VGG16 
+from keras.models import Model
+from sklearn.cluster import KMeans
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import urllib.request
+from PIL import Image
+import pickle
+
+#export FLASK_APP=example
+#export FLASK_ENV=development
+#flask run
+
+app = Flask(__name__)
+
+path = r'D:\Projects\eyewear_classification'
+vgg_model = VGG16()
+vgg_model = Model(inputs = vgg_model.inputs, outputs = vgg_model.layers[-2].output)
+svm_model1 = pickle.load(open(path+r'/svm_model1.sav', 'rb'))
+svm_model2 = pickle.load(open(path+r'/svm_model2.sav', 'rb'))
+pca = pickle.load(open(path+r'/pca.sav', 'rb'))
+kmeans = pickle.load(open(path+r'\kmeans.sav', 'rb'))
+
+
+def extract_features(model,im_path):
+    # load the image as a 224x224 array
+    img = load_img(im_path, target_size=(224,224))
+    img = np.array(img)
+    # reshape the data for the model reshape(num_of_samples, dim 1, dim 2, channels)
+    reshaped_img = img.reshape(1,224,224,3)
+    imgx = preprocess_input(reshaped_img)
+    features = model.predict(imgx, use_multiprocessing=True)
+    features = pca.transform(features)
+    return features
+
+def pred_type(im_feat):
+    pt = svm_model1.predict(im_feat)
+    return pt
+
+def pred_shape(im_feat):
+    ps = svm_model2.predict(im_feat)
+    return ps
+def pred_sim_imgs(x,filenames,im_feat):
+    kmeans = KMeans(n_clusters=16, random_state=22)
+    kmeans.fit(x)
+    groups = {}
+    count = -1
+    # grouping the images belonging to same cluster
+    for file, cluster in zip(filenames,kmeans.labels_):
+        count = count+1
+        if cluster not in groups.keys():
+            groups[cluster] = []
+            groups[cluster].append(file)
+        else:
+            groups[cluster].append(file)
+    
+    j=0
+    # extracting features all members of the cluster to which our sample belongs
+    clust_ind = kmeans.labels_[j]
+    cluster_x = x[np.where(kmeans.labels_== clust_ind)]
+    # calculating eucilidian distance between feature vector of our sample and every member of it's cluster
+    distances = np.linalg.norm(cluster_x - im_feat, axis=1)
+    k = 11
+    # ids contains the index of 11 closest members of the cluster to the test image
+    ids = distances.argsort()[:k]
+    # Retrieving url(s)
+    u1 = groups[clust_ind][1]
+    u2 = groups[clust_ind][2]
+    u3 = groups[clust_ind][3]
+    u4 = groups[clust_ind][4]
+    u5 = groups[clust_ind][5]
+    u6 = groups[clust_ind][6]
+    u7 = groups[clust_ind][7]
+    u8 = groups[clust_ind][8]
+    u9 = groups[clust_ind][9]
+    u10 = groups[clust_ind][10]
+    return u1,u2,u3,u4,u5,u6,u7,u8,u9,u10
+
+@app.route("/", methods=['GET','POST'])
+def main():
+    return render_template("index.html")
+
+@app.route("/submit", methods=['GET','POST'])
+def get_output():
+    if request.method == 'POST':
+        img = request.files['my_image']
+        
+        im_path = path+r'/static/'+ img.filename
+        img.save(im_path)
+        
+        im_feat = extract_features(vgg_model,im_path)
+        pt = pred_type(im_feat)
+        ps = pred_shape(im_feat)
+        filenames = np.load(path+r'\filenames.npy')
+        x = np.load(path+r'\x.npy')
+        x = np.concatenate((im_feat, x), axis=0)
+        u1,u2,u3,u4,u5,u6,u7,u8,u9,u10 = pred_sim_imgs(x,filenames,im_feat)
+                
+    return render_template("index.html", prediction_type = pt, prediction_shape = ps, img_path = im_path, img_path1 = u1, img_path2 = u2, img_path3 = u3, img_path4 = u4, img_path5 = u5, img_path6 = u6, img_path7 = u7, img_path8 = u8,img_path9 = u9, img_path10 = u10)
+
+
+if __name__ == '__main__':
+    app.run(debug=True, use_reloader=False)
